@@ -3,7 +3,7 @@ export DRIVER_INSTALLER_FILE_NAME="driver_installer.run"
 #wget http://us.download.nvidia.com/tesla/410.72/NVIDIA-Linux-x86_64-410.72.run -O ${DRIVER_INSTALLER_FILE_NAME}
 wget https://developer.nvidia.com/compute/cuda/9.0/Prod/local_installers/cuda_9.0.176_384.81_linux-run -O ${DRIVER_INSTALLER_FILE_NAME}
 chmod +x ${DRIVER_INSTALLER_FILE_NAME}
-sudo ./${DRIVER_INSTALLER_FILE_NAME} --dkms -a -s --no-drm
+sudo ./${DRIVER_INSTALLER_FILE_NAME} --silent --no-drm
 rm -rf ${DRIVER_INSTALLER_FILE_NAME}
 
 wget https://www.dropbox.com/s/c80oz0akb2j19kv/libcudnn7_7.0.5.15-1%2Bcuda9.0_amd64.deb?dl=1 -O libcudnn7_7.0.5.15-1+cuda9.0_amd64.deb
