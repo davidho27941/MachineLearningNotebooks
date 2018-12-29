@@ -233,13 +233,18 @@ def train_model(preds, in_images, train_files, is_retrain = False, train_epoch =
 
 def test_model(preds, in_images, test_files):
     """Test the model"""
+    import tensorflow as tf
+    from keras import backend as K
+    import numpy as np
     from keras.metrics import categorical_accuracy
     from tqdm import tqdm
+    
     in_labels = tf.placeholder(tf.float32, shape=(None, 2))
     accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
     auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
    
     chunk_size = 64
+    n_test_events = count_events(test_files)
     chunk_num = n_test_events/chunk_size
     preds_all = []
     label_all = []
@@ -249,7 +254,7 @@ def test_model(preds, in_images, test_files):
     
     avg_accuracy = 0
     avg_auc = 0
-    for img_chunk, label_chunk in tqdm(chunks(test_files, chunk_size)):
+    for img_chunk, label_chunk in tqdm(chunks(test_files, chunk_size),total=chunk_num):
         accuracy_result, auc_result, preds_result = sess.run([accuracy, auc, preds],
                         feed_dict={in_images: img_chunk,
                                    in_labels: label_chunk,
