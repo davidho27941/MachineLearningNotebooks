@@ -79,17 +79,18 @@ def construct_model(quantized, saved_model_dir = None, starting_weights_director
     in_images, image_tensors = preprocess_images()
 
     # Construct featurizer using quantized or unquantized ResNet50 model
+    
     if not quantized:
         featurizer = Resnet50(saved_model_dir, custom_weights_directory = starting_weights_directory)
     else:
         featurizer = QuantizedResnet50(saved_model_dir, custom_weights_directory = starting_weights_directory)
-
-
+    
     features = featurizer.import_graph_def(input_tensor=image_tensors)
     
     # Construct classifier
-    classifier = construct_classifier()
-    preds = classifier(features)
+    with tf.name_scope('classifier'):
+        classifier = construct_classifier()
+        preds = classifier(features)
     
     # Initialize weights
     sess = tf.get_default_session()
@@ -133,14 +134,15 @@ def chunks(files, chunksize):
         a = np.array(f.root.img_pt) # Images 
         b = np.array(f.root.label) # Labels 
         c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)]
+        np.random.seed(42) 
         np.random.shuffle(c)
         test_images = c[:, :a.size//len(a)].reshape(a.shape)
         test_labels = c[:, a.size//len(a):].reshape(b.shape)
 
-        for istart in range(0,test_images.shape[0],chunksize): 
-            yield normalize_and_rgb(test_images[istart:istart+chunksize]),test_labels[istart:istart+chunksize]
+        for istart in range(0,test_images.shape[0],chunksize):  
+            yield normalize_and_rgb(test_images[istart:istart+chunksize]),test_labels[istart:istart+chunksize], len(test_labels[istart:istart+chunksize])
 
-def train_model(preds, in_images, train_files, is_retrain = False, train_epoch = 10, classifier=None, saver=None, checkpoint_path=None): 
+def train_model(preds, in_images, train_files, val_files, is_retrain = False, train_epoch = 10, classifier=None, saver=None, checkpoint_path=None): 
     """ training model """ 
     import tensorflow as tf
     from keras import backend as K
@@ -152,21 +154,31 @@ def train_model(preds, in_images, train_files, is_retrain = False, train_epoch =
 
     # Specify the loss function
     in_labels = tf.placeholder(tf.float32, shape=(None, 2))   
-    cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
+    with tf.name_scope('xent'):
+        cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
+        
+    with tf.name_scope('train'):
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
+        #optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy)
 
-    accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
-    auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
+    with tf.name_scope('metrics'):
+        accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
+        auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
     
     sess = tf.get_default_session()
+    # to re-initialize all variables (including those related to Adam)... need to reload model parameters here
+    #sess.run(tf.group(tf.local_variables_initializer(),tf.global_variables_initializer()))
+    # to re-initialize just variables
     sess.run(tf.local_variables_initializer())
     
     # Create a summary to monitor cross_entropy loss
     tf.summary.scalar("loss", cross_entropy)
     # Create a summary to monitor accuracy 
     tf.summary.scalar("accuracy", accuracy)
-    # Create a summary to monitor auc tensor
+    # Create a summary to monitor auc 
     tf.summary.scalar("auc", auc[0])
+    # create a summary to look at input images
+    tf.summary.image("images", in_images, 3)
     
     # Create summaries to visualize weights
     #for var in tf.trainable_variables():
@@ -184,13 +196,19 @@ def train_model(preds, in_images, train_files, is_retrain = False, train_epoch =
 
     chunk_size = 64
     n_train_events = count_events(train_files)
-    chunk_num = n_train_events / chunk_size
+    train_chunk_num = int(n_train_events / chunk_size)+1
     
-    summary_writer = tf.summary.FileWriter(checkpoint_path + '/logs', sess.graph)
+    train_writer = tf.summary.FileWriter(checkpoint_path + '/logs/train', sess.graph)
+    val_writer = tf.summary.FileWriter(checkpoint_path + '/logs/val', sess.graph)
 
     loss_over_epoch = []
     accuracy_over_epoch = []
     auc_over_epoch = []
+    
+    val_loss_over_epoch = []
+    val_accuracy_over_epoch = []
+    val_auc_over_epoch = []
+    best_val_loss = 999999
 
     for epoch in range(train_epoch):
         avg_loss = 0
@@ -199,19 +217,18 @@ def train_model(preds, in_images, train_files, is_retrain = False, train_epoch =
         preds_temp = []
         label_temp = []
         i = 0
-        for img_chunk, label_chunk in tqdm(chunks(train_files, chunk_size),total=chunk_num):
-            _, loss, summary = sess.run([optimizer, cross_entropy, merged_summary_op],
+        for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(train_files, chunk_size),total=train_chunk_num):
+            _, loss, summary, accuracy_result, auc_result = sess.run([optimizer, 
+                                                                      cross_entropy, 
+                                                                      merged_summary_op,
+                                                                      accuracy, auc],
                             feed_dict={in_images: img_chunk,
                                        in_labels: label_chunk,
                                        K.learning_phase(): 1})
-            avg_loss += loss / chunk_num
-            accuracy_result, auc_result, preds_result = sess.run([accuracy, auc, preds],
-                                  feed_dict={in_images: img_chunk,
-                                            in_labels: label_chunk,
-                                            K.learning_phase(): 0})
-            avg_accuracy += accuracy_result / chunk_num
-            avg_auc += auc_result[0] / chunk_num
-            summary_writer.add_summary(summary, epoch * chunk_num + i)
+            avg_loss += loss * real_chunk_size / n_train_events
+            avg_accuracy += accuracy_result * real_chunk_size / n_train_events
+            avg_auc += auc_result[0] * real_chunk_size / n_train_events
+            train_writer.add_summary(summary, epoch * train_chunk_num + i)
             i += 1
         
         print("Epoch:", (epoch + 1), "loss = ", "{:.3f}".format(avg_loss))
@@ -221,6 +238,31 @@ def train_model(preds, in_images, train_files, is_retrain = False, train_epoch =
         accuracy_over_epoch.append(avg_accuracy)
         auc_over_epoch.append(avg_auc)
 
+        n_val_events = count_events(val_files)
+        val_chunk_num = int(n_val_events / chunk_size)+1
+        
+        avg_val_loss = 0
+        avg_val_accuracy = 0
+        avg_val_auc = 0
+        i = 0
+        for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(val_files, chunk_size),total=val_chunk_num):
+            val_loss, val_accuracy_result, val_auc_result, summary = sess.run([cross_entropy, accuracy, auc, merged_summary_op],
+                                feed_dict={in_images: img_chunk,
+                                           in_labels: label_chunk,
+                                           K.learning_phase(): 0})
+            avg_val_loss += val_loss * real_chunk_size / n_val_events
+            avg_val_accuracy += val_accuracy_result * real_chunk_size / n_val_events
+            avg_val_auc += val_auc_result[0] * real_chunk_size / n_val_events
+            val_writer.add_summary(summary, epoch * val_chunk_num + i)
+            i += 1
+            
+        print("Epoch:", (epoch + 1), "val_loss = ", "{:.3f}".format(avg_val_loss))
+        print("Validation Accuracy:", "{:.3f}".format(avg_val_accuracy), ", Area under ROC curve:", "{:.3f}".format(avg_val_auc))
+    
+        val_loss_over_epoch.append(avg_val_loss)
+        val_accuracy_over_epoch.append(avg_val_accuracy)
+        val_auc_over_epoch.append(avg_val_auc)
+        
         if saver is not None and checkpoint_path is not None and classifier is not None:
             saver.save(sess, checkpoint_path+'/resnet50_bw', write_meta_graph=False, global_step = epoch)
             saver.save(sess, checkpoint_path+'/resnet50_bw', write_meta_graph=False)
@@ -228,8 +270,15 @@ def train_model(preds, in_images, train_files, is_retrain = False, train_epoch =
             classifier.save(checkpoint_path+'/class_model-%s.h5'%epoch)
             classifier.save_weights(checkpoint_path+'/class_weights.h5')
             classifier.save(checkpoint_path+'/class_model.h5')
+            if avg_val_loss < best_val_loss:
+                print("new best model")
+                best_val_loss = avg_val_loss
+                saver.save(sess, checkpoint_path+'/resnet50_bw_best', write_meta_graph=False)
+                classifier.save_weights(checkpoint_path+'/class_weights_best.h5')
+                classifier.save(checkpoint_path+'/class_model_best.h5')
+                
         
-    return loss_over_epoch, accuracy_over_epoch, auc_over_epoch
+    return loss_over_epoch, accuracy_over_epoch, auc_over_epoch, val_loss_over_epoch, val_accuracy_over_epoch, val_auc_over_epoch
 
 def test_model(preds, in_images, test_files):
     """Test the model"""
@@ -245,7 +294,7 @@ def test_model(preds, in_images, test_files):
    
     chunk_size = 64
     n_test_events = count_events(test_files)
-    chunk_num = n_test_events/chunk_size
+    chunk_num = int(n_test_events/chunk_size)+1
     preds_all = []
     label_all = []
     
@@ -254,13 +303,13 @@ def test_model(preds, in_images, test_files):
     
     avg_accuracy = 0
     avg_auc = 0
-    for img_chunk, label_chunk in tqdm(chunks(test_files, chunk_size),total=chunk_num):
+    for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(test_files, chunk_size),total=chunk_num):
         accuracy_result, auc_result, preds_result = sess.run([accuracy, auc, preds],
                         feed_dict={in_images: img_chunk,
                                    in_labels: label_chunk,
                                    K.learning_phase(): 0})
-        avg_accuracy += accuracy_result / chunk_num
-        avg_auc += auc_result[0] / chunk_num 
+        avg_accuracy += accuracy_result * real_chunk_size / n_test_events
+        avg_auc += auc_result[0]  * real_chunk_size / n_test_events 
         preds_all.extend(preds_result)
         label_all.extend(label_chunk)
             
