@@ -70,7 +70,7 @@ def construct_classifier():
     
     return model
 
-def construct_model(quantized, saved_model_dir = None, starting_weights_directory = None):
+def construct_model(quantized, saved_model_dir = None, starting_weights_directory = None, is_frozen=False):
     from azureml.contrib.brainwave.models import Resnet50, QuantizedResnet50
     import tensorflow as tf
     from keras import backend as K
@@ -81,9 +81,9 @@ def construct_model(quantized, saved_model_dir = None, starting_weights_director
     # Construct featurizer using quantized or unquantized ResNet50 model
     
     if not quantized:
-        featurizer = Resnet50(saved_model_dir, custom_weights_directory = starting_weights_directory)
+        featurizer = Resnet50(saved_model_dir, is_frozen=is_frozen, custom_weights_directory = starting_weights_directory)
     else:
-        featurizer = QuantizedResnet50(saved_model_dir, custom_weights_directory = starting_weights_directory)
+        featurizer = QuantizedResnet50(saved_model_dir, is_frozen=is_frozen, custom_weights_directory = starting_weights_directory)
     
     features = featurizer.import_graph_def(input_tensor=image_tensors)
     
@@ -96,8 +96,8 @@ def construct_model(quantized, saved_model_dir = None, starting_weights_director
     sess = tf.get_default_session()
     tf.global_variables_initializer().run()
     
-    
-    featurizer.restore_weights(sess)
+    if not is_frozen:
+        featurizer.restore_weights(sess)
     
     if starting_weights_directory is not None:
         print("loading classifier weights from", starting_weights_directory+'/class_weights.h5')
@@ -158,18 +158,22 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
         cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
         
     with tf.name_scope('train'):
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
-        #optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy)
+        #optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
+        #momentum = 0.9
+        #optimizer_def = tf.train.MomentumOptimizer(learning_rate, momentum, use_nesterov=True)
+        #optimizer = optimizer_def.minimize(cross_entropy)
+        optimizer_def = tf.train.AdamOptimizer(learning_rate)
+        optimizer = optimizer_def.minimize(cross_entropy)
 
     with tf.name_scope('metrics'):
         accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
         auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
     
     sess = tf.get_default_session()
-    # to re-initialize all variables (including those related to Adam)... need to reload model parameters here
+    # to re-initialize all variables 
     #sess.run(tf.group(tf.local_variables_initializer(),tf.global_variables_initializer()))
-    # to re-initialize just variables
-    sess.run(tf.local_variables_initializer())
+    # to re-initialize just local variables + optimizer variables
+    sess.run(tf.group(tf.local_variables_initializer(),tf.variables_initializer(optimizer_def.variables())))
     
     # Create a summary to monitor cross_entropy loss
     tf.summary.scalar("loss", cross_entropy)
@@ -284,13 +288,17 @@ def test_model(preds, in_images, test_files):
     """Test the model"""
     import tensorflow as tf
     from keras import backend as K
+    from keras.objectives import binary_crossentropy 
     import numpy as np
     from keras.metrics import categorical_accuracy
     from tqdm import tqdm
     
     in_labels = tf.placeholder(tf.float32, shape=(None, 2))
+    
+    cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
     accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
     auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
+    
    
     chunk_size = 64
     n_test_events = count_events(test_files)
@@ -303,14 +311,19 @@ def test_model(preds, in_images, test_files):
     
     avg_accuracy = 0
     avg_auc = 0
+    avg_test_loss = 0
     for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(test_files, chunk_size),total=chunk_num):
-        accuracy_result, auc_result, preds_result = sess.run([accuracy, auc, preds],
+        test_loss, accuracy_result, auc_result, preds_result = sess.run([cross_entropy, accuracy, auc, preds],
                         feed_dict={in_images: img_chunk,
                                    in_labels: label_chunk,
                                    K.learning_phase(): 0})
+        avg_test_loss += test_loss * real_chunk_size / n_test_events
         avg_accuracy += accuracy_result * real_chunk_size / n_test_events
         avg_auc += auc_result[0]  * real_chunk_size / n_test_events 
         preds_all.extend(preds_result)
         label_all.extend(label_chunk)
-            
-    return avg_accuracy, avg_auc, np.asarray(preds_all).reshape(n_test_events,2), np.asarray(label_all).reshape(n_test_events,2)
+    
+    print("test_loss = ", "{:.3f}".format(avg_test_loss))
+    print("Test Accuracy:", "{:.3f}".format(avg_accuracy), ", Area under ROC curve:", "{:.3f}".format(avg_auc))
+    
+    return avg_test_loss, avg_accuracy, avg_auc, np.asarray(preds_all).reshape(n_test_events,2), np.asarray(label_all).reshape(n_test_events,2)
