@@ -105,7 +105,7 @@ def construct_model(quantized, saved_model_dir = None, starting_weights_director
         
     return in_images, image_tensors, features, preds, featurizer, classifier 
 
-def check_model(preds, in_images, train_files, classifier):
+def check_model(preds, features, in_images, train_files, classifier):
     import tensorflow as tf
     from keras import backend as K
     
@@ -298,7 +298,6 @@ def test_model(preds, in_images, test_files):
     cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
     accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
     auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
-    
    
     chunk_size = 64
     n_test_events = count_events(test_files)

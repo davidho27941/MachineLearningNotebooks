@@ -333,4 +333,11 @@ ASALocalRun/
 .ipynb_checkpoints/
 
 # AML configuration directory
-aml_config/
+aml_config
+
+
+# Data files
+weights*
+data*
+models
+*.pdf
