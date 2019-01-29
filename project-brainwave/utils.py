@@ -70,7 +70,7 @@ def construct_classifier():
     
     return model
 
-def construct_model(quantized, saved_model_dir = None, starting_weights_directory = None, is_frozen=False):
+def construct_model(quantized, saved_model_dir = None, starting_weights_directory = None, is_frozen=False, is_training=True):
     from azureml.contrib.brainwave.models import Resnet50, QuantizedResnet50
     import tensorflow as tf
     from keras import backend as K
@@ -85,7 +85,7 @@ def construct_model(quantized, saved_model_dir = None, starting_weights_director
     else:
         featurizer = QuantizedResnet50(saved_model_dir, is_frozen=is_frozen, custom_weights_directory = starting_weights_directory)
     
-    features = featurizer.import_graph_def(input_tensor=image_tensors)
+    features = featurizer.import_graph_def(input_tensor=image_tensors, is_training=is_training)
     
     # Construct classifier
     with tf.name_scope('classifier'):
@@ -134,7 +134,6 @@ def chunks(files, chunksize):
         a = np.array(f.root.img_pt) # Images 
         b = np.array(f.root.label) # Labels 
         c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)]
-        np.random.seed(42) 
         np.random.shuffle(c)
         test_images = c[:, :a.size//len(a)].reshape(a.shape)
         test_labels = c[:, a.size//len(a):].reshape(b.shape)
@@ -157,13 +156,15 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     with tf.name_scope('xent'):
         cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
         
-    with tf.name_scope('train'):
+    with tf.name_scope('train'):  
         #optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
         #momentum = 0.9
         #optimizer_def = tf.train.MomentumOptimizer(learning_rate, momentum, use_nesterov=True)
         #optimizer = optimizer_def.minimize(cross_entropy)
         optimizer_def = tf.train.AdamOptimizer(learning_rate)
-        optimizer = optimizer_def.minimize(cross_entropy)
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            optimizer = optimizer_def.minimize(cross_entropy)
 
     with tf.name_scope('metrics'):
         accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
