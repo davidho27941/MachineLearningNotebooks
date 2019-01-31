@@ -34,6 +34,45 @@ def count_events(train_files):
         n_events += f.root.label.shape[0]
     return n_events
 
+# Create a heatmap of the training file hits.
+# Useful for visually confirming the data is well-distributed.
+def test_heatmap(train_files):
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    a, b = image_with_label(train_files[0],0,20000)
+    new_a = np.swapaxes(a[:,:,:,0],0,2)
+    new_a = np.swapaxes(new_a,0,1)
+    c = np.dot(new_a,b[:,0])
+    d = np.dot(new_a,b[:,1])
+    %matplotlib inline
+    #mpl.use('agg')
+
+    width = 64
+    height = 64
+    fontsize = 120
+
+    plt.figure(figsize=(width,height))
+    ax = plt.subplot() 
+    for label in (ax.get_xticklabels() + ax.get_yticklabels()): label.set_fontsize(fontsize)
+    plt.imshow(c, norm=mpl.colors.LogNorm(), origin='lower', interpolation='nearest',label='top')
+    cbar = plt.colorbar(shrink=0.82)
+    cbar.ax.tick_params(labelsize=fontsize)
+    cbar.set_label(r'$p_T$', fontsize=fontsize)
+    plt.xlabel(r'$i\eta$', fontsize=fontsize)
+    plt.ylabel(r'$i\phi$', fontsize=fontsize)
+    plt.savefig('top.pdf')
+
+    plt.figure(figsize=(width,height))
+    ax = plt.subplot() 
+    for label in (ax.get_xticklabels() + ax.get_yticklabels()): label.set_fontsize(fontsize)
+    plt.imshow(d, norm=mpl.colors.LogNorm(), origin='lower', interpolation='nearest',label='QCD')
+    cbar = plt.colorbar(shrink=0.82)
+    cbar.ax.tick_params(labelsize=fontsize)
+    cbar.set_label(r'$p_T$', fontsize=fontsize)
+    plt.xlabel(r'$i\eta$', fontsize=fontsize)
+    plt.ylabel(r'$i\phi$', fontsize=fontsize)
+    plt.savefig('QCD.pdf')
+
 def preprocess_images():
     import tensorflow as tf
     # Create a placeholder for our incoming images
@@ -328,43 +367,58 @@ def test_model(preds, in_images, test_files):
     
     return avg_test_loss, avg_accuracy, avg_auc, np.asarray(preds_all).reshape(n_test_events,2), np.asarray(label_all).reshape(n_test_events,2)
 
+# Save the results of the previous test.
+# Provide the result saving directory, the prefix (see below), the label np array and the pred np array.
+# It also expects a strict naming paradigm:
+#   Non-quantized testing should be prefixed 't'
+#   Quantized testing before fine-tuning should be prefixed 'q'
+#   Quantized testing after fine-tuning should be prefixed 'ft'
+#   Quantized testing on Brainwave should be prefixed 'b'
 def save_results(results_dir, prefix, labels, preds):
     import numpy as np
     
     np.save(results_dir + "/" + prefix + "_labels.npy", labels)
     np.save(results_dir + "/" + prefix + "_preds.npy", preds)
     
+# Once results have been compiled, use this function to plot them.
+# It expects all the files to be there at runtime, so if they haven't yet been generated,
+# comment out the relevant lines.
 def plot_results(results_dir):
     import os
     import numpy as np
     from sklearn import metrics
 
-    test_labels_t = np.load(results_dir + "/t_labels.npy")
-    test_preds_t = np.load(results_dir + "/t_preds.npy")
-#     test_labels_q = np.load(results_dir + "/q_labels.npy")
-#     test_preds_q = np.load(results_dir + "/q_preds.npy")
+    # Load the labels and results into memory.
+    test_labels_t  = np.load(results_dir + "/t_labels.npy")
+    test_preds_t   = np.load(results_dir + "/t_preds.npy")
+#     test_labels_q  = np.load(results_dir + "/q_labels.npy")
+#     test_preds_q   = np.load(results_dir + "/q_preds.npy")
 #     test_labels_ft = np.load(results_dir + "/ft_labels.npy")
-#     test_preds_ft = np.load(results_dir + "/ft_preds.npy")
-#     test_labels_b = np.load(results_dir + "/s_labels.npy")
-#     test_preds_b = np.load(results_dir + "/s_preds.npy")
+#     test_preds_ft  = np.load(results_dir + "/ft_preds.npy")
+#     test_labels_b  = np.load(results_dir + "/s_labels.npy")
+#     test_preds_b   = np.load(results_dir + "/s_preds.npy")
     
-    fpr_test_t, tpr_test_t, thresholds = metrics.roc_curve(test_labels_t[:,0],test_preds_t[:,0])
-#     fpr_test_q, tpr_test_q, thresholds_q = metrics.roc_curve(test_labels_q[:,0],test_preds_q[:,0])
-#     fpr_test_ft, tpr_test_ft, thresholds_ft = metrics.roc_curve(test_labels_ft[:,0],test_preds_ft[:,0])
-#     fpr_test_b, tpr_test_b, thresholds_b = metrics.roc_curve(test_labels_b[:,0],test_preds_b[:,0])
+    # Determine the ROC curve for each of the tests. 
+    # [:,0] will convert the labels from one-hot to binary.
+    fpr_test_t, tpr_test_t, thresholds      = metrics.roc_curve(test_labels_t[:,0],  test_preds_t[:,0])
+#     fpr_test_q, tpr_test_q, thresholds_q    = metrics.roc_curve(test_labels_q[:,0],  test_preds_q[:,0])
+#     fpr_test_ft, tpr_test_ft, thresholds_ft = metrics.roc_curve(test_labels_ft[:,0], test_preds_ft[:,0])
+#     fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b[:,0],  test_preds_b[:,0])
     
-    auc_test = metrics.auc(fpr_test, tpr_test)
-#     auc_test_q = metrics.auc(fpr_test_q, tpr_test_q)
+    # Use the data we just generated to determine the area under the ROC curve.
+    auc_test    = metrics.auc(fpr_test_t, tpr_test_t)
+#     auc_test_q  = metrics.auc(fpr_test_q, tpr_test_q)
 #     auc_test_ft = metrics.auc(fpr_test_ft, tpr_test_ft)
-#     auc_test_b = metrics.auc(fpr_test_b, tpr_test_b)
+#     auc_test_b  = metrics.auc(fpr_test_b, tpr_test_b)
 
+    # Plot the ROCs, labeling with the AUCs.
     %matplotlib inline
     import matplotlib.pyplot as plt
     plt.figure(figsize=(7,5))
-    plt.plot(tpr_test,fpr_test,label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
-#     plt.plot(tpr_test_q,fpr_test_q,label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
-#     plt.plot(tpr_test_ft,fpr_test_ft,label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
-#     plt.plot(tpr_test_b,fpr_test_b,label='Custom weights, Brainwave, AUC = %.2f%%'%(auc_test_b*100.))
+    plt.plot(tpr_test,    fpr_test,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
+#     plt.plot(tpr_test_q,  fpr_test_q,  label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
+#     plt.plot(tpr_test_ft, fpr_test_ft, label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
+#     plt.plot(tpr_test_b,  fpr_test_b,  label='Custom weights, Brainwave, AUC = %.2f%%'%(auc_test_b*100.))
     
     plt.semilogy()
     plt.xlabel("Signal efficiency")
@@ -375,16 +429,17 @@ def plot_results(results_dir):
     plt.legend(loc='upper left')
     plt.savefig('ROC_ft.pdf')
 
+    # Find the true positive rate of 30% and 1 over the false positive rate at tpr = 30%.
     def find_nearest(array,value):
         idx = (np.abs(array-value)).argmin()
         return idx
 
-    idx = find_nearest(tpr_test,0.3)
-#     idx_q = find_nearest(tpr_test_q,0.3)
+    idx_t    = find_nearest(tpr_test_t,0.3)
+#     idx_q  = find_nearest(tpr_test_q,0.3)
 #     idx_ft = find_nearest(tpr_test_ft,0.3)
-#     idx_b = find_nearest(tpr_test_b,0.3)
+#     idx_b  = find_nearest(tpr_test_b,0.3)
     
-    print (loss, accuracy, auc_test, tpr_test[idx], 1./fpr_test[idx])
+    print (loss_t, accuracy_t, auc_test_t, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
 #     print (loss_q, accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
 #     print (loss_ft, accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
 #     print (loss_b, accuracy_b, auc_test_b, tpr_test_b[idx_b], 1./fpr_test_b[idx_b])
