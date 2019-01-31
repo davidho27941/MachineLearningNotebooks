@@ -199,7 +199,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     # Merge all summaries into a single op
     merged_summary_op = tf.summary.merge_all()
 
-    chunk_size = 64
+    chunk_size = 32
     n_train_events = count_events(train_files)
     train_chunk_num = int(n_train_events / chunk_size)+1
     
@@ -327,3 +327,64 @@ def test_model(preds, in_images, test_files):
     print("Test Accuracy:", "{:.3f}".format(avg_accuracy), ", Area under ROC curve:", "{:.3f}".format(avg_auc))
     
     return avg_test_loss, avg_accuracy, avg_auc, np.asarray(preds_all).reshape(n_test_events,2), np.asarray(label_all).reshape(n_test_events,2)
+
+def save_results(results_dir, prefix, labels, preds):
+    import numpy as np
+    
+    np.save(results_dir + "/" + prefix + "_labels.npy", labels)
+    np.save(results_dir + "/" + prefix + "_preds.npy", preds)
+    
+def plot_results(results_dir):
+    import os
+    import numpy as np
+    from sklearn import metrics
+
+    test_labels_t = np.load(results_dir + "/t_labels.npy")
+    test_preds_t = np.load(results_dir + "/t_preds.npy")
+#     test_labels_q = np.load(results_dir + "/q_labels.npy")
+#     test_preds_q = np.load(results_dir + "/q_preds.npy")
+#     test_labels_ft = np.load(results_dir + "/ft_labels.npy")
+#     test_preds_ft = np.load(results_dir + "/ft_preds.npy")
+#     test_labels_b = np.load(results_dir + "/s_labels.npy")
+#     test_preds_b = np.load(results_dir + "/s_preds.npy")
+    
+    fpr_test_t, tpr_test_t, thresholds = metrics.roc_curve(test_labels_t[:,0],test_preds_t[:,0])
+#     fpr_test_q, tpr_test_q, thresholds_q = metrics.roc_curve(test_labels_q[:,0],test_preds_q[:,0])
+#     fpr_test_ft, tpr_test_ft, thresholds_ft = metrics.roc_curve(test_labels_ft[:,0],test_preds_ft[:,0])
+#     fpr_test_b, tpr_test_b, thresholds_b = metrics.roc_curve(test_labels_b[:,0],test_preds_b[:,0])
+    
+    auc_test = metrics.auc(fpr_test, tpr_test)
+#     auc_test_q = metrics.auc(fpr_test_q, tpr_test_q)
+#     auc_test_ft = metrics.auc(fpr_test_ft, tpr_test_ft)
+#     auc_test_b = metrics.auc(fpr_test_b, tpr_test_b)
+
+    %matplotlib inline
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(7,5))
+    plt.plot(tpr_test,fpr_test,label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
+#     plt.plot(tpr_test_q,fpr_test_q,label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
+#     plt.plot(tpr_test_ft,fpr_test_ft,label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
+#     plt.plot(tpr_test_b,fpr_test_b,label='Custom weights, Brainwave, AUC = %.2f%%'%(auc_test_b*100.))
+    
+    plt.semilogy()
+    plt.xlabel("Signal efficiency")
+    plt.ylabel("Background efficiency")
+    plt.ylim(0.00001,1)
+    plt.xlim(0,1)
+    plt.grid(True)
+    plt.legend(loc='upper left')
+    plt.savefig('ROC_ft.pdf')
+
+    def find_nearest(array,value):
+        idx = (np.abs(array-value)).argmin()
+        return idx
+
+    idx = find_nearest(tpr_test,0.3)
+#     idx_q = find_nearest(tpr_test_q,0.3)
+#     idx_ft = find_nearest(tpr_test_ft,0.3)
+#     idx_b = find_nearest(tpr_test_b,0.3)
+    
+    print (loss, accuracy, auc_test, tpr_test[idx], 1./fpr_test[idx])
+#     print (loss_q, accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
+#     print (loss_ft, accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
+#     print (loss_b, accuracy_b, auc_test_b, tpr_test_b[idx_b], 1./fpr_test_b[idx_b])
