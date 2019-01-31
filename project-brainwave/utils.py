@@ -238,7 +238,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     # Merge all summaries into a single op
     merged_summary_op = tf.summary.merge_all()
 
-    chunk_size = 32
+    chunk_size = 64
     n_train_events = count_events(train_files)
     train_chunk_num = int(n_train_events / chunk_size)+1
     
@@ -415,7 +415,7 @@ def plot_results(results_dir):
 #     %matplotlib inline
     import matplotlib.pyplot as plt
     plt.figure(figsize=(7,5))
-    plt.plot(tpr_test,    fpr_test,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
+    plt.plot(tpr_test_t,    fpr_test_t,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
 #     plt.plot(tpr_test_q,  fpr_test_q,  label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
 #     plt.plot(tpr_test_ft, fpr_test_ft, label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
 #     plt.plot(tpr_test_b,  fpr_test_b,  label='Custom weights, Brainwave, AUC = %.2f%%'%(auc_test_b*100.))
