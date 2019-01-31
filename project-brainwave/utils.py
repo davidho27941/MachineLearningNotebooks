@@ -44,7 +44,7 @@ def test_heatmap(train_files):
     new_a = np.swapaxes(new_a,0,1)
     c = np.dot(new_a,b[:,0])
     d = np.dot(new_a,b[:,1])
-    %matplotlib inline
+#     %matplotlib inline
     #mpl.use('agg')
 
     width = 64
@@ -412,7 +412,7 @@ def plot_results(results_dir):
 #     auc_test_b  = metrics.auc(fpr_test_b, tpr_test_b)
 
     # Plot the ROCs, labeling with the AUCs.
-    %matplotlib inline
+#     %matplotlib inline
     import matplotlib.pyplot as plt
     plt.figure(figsize=(7,5))
     plt.plot(tpr_test,    fpr_test,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
