@@ -390,40 +390,40 @@ def plot_results(results_dir):
     from sklearn import metrics
 
     # Load the labels and results into memory.
-#     accuracy_t     = np.load(results_dir + "/t_accuracy.npy")
-#     test_labels_t  = np.load(results_dir + "/t_labels.npy")
-#     test_preds_t   = np.load(results_dir + "/t_preds.npy")
-#     accuracy_q     = np.load(results_dir + "/q_accuracy.npy")
-#     test_labels_q  = np.load(results_dir + "/q_labels.npy")
-#     test_preds_q   = np.load(results_dir + "/q_preds.npy")
-#     accuracy_ft     = np.load(results_dir + "/ft_accuracy.npy")
-#     test_labels_ft = np.load(results_dir + "/ft_labels.npy")
-#     test_preds_ft  = np.load(results_dir + "/ft_preds.npy")
+    accuracy_t     = np.load(results_dir + "/t_accuracy.npy")
+    test_labels_t  = np.load(results_dir + "/t_labels.npy")
+    test_preds_t   = np.load(results_dir + "/t_preds.npy")
+    accuracy_q     = np.load(results_dir + "/q_accuracy.npy")
+    test_labels_q  = np.load(results_dir + "/q_labels.npy")
+    test_preds_q   = np.load(results_dir + "/q_preds.npy")
+    accuracy_ft     = np.load(results_dir + "/ft_accuracy.npy")
+    test_labels_ft = np.load(results_dir + "/ft_labels.npy")
+    test_preds_ft  = np.load(results_dir + "/ft_preds.npy")
     accuracy_b     = np.load(results_dir + "/b_accuracy.npy")
     test_labels_b  = np.load(results_dir + "/b_labels.npy")
     test_preds_b   = np.load(results_dir + "/b_preds.npy")
     
     # Determine the ROC curve for each of the tests. 
     # [:,0] will convert the labels from one-hot to binary.
-#     fpr_test_t, tpr_test_t, thresholds      = metrics.roc_curve(test_labels_t[:,0],  test_preds_t[:,0])
-#     fpr_test_q, tpr_test_q, thresholds_q    = metrics.roc_curve(test_labels_q[:,0],  test_preds_q[:,0])
-#     fpr_test_ft, tpr_test_ft, thresholds_ft = metrics.roc_curve(test_labels_ft[:,0], test_preds_ft[:,0])
+    fpr_test_t, tpr_test_t, thresholds      = metrics.roc_curve(test_labels_t[:,0],  test_preds_t[:,0])
+    fpr_test_q, tpr_test_q, thresholds_q    = metrics.roc_curve(test_labels_q[:,0],  test_preds_q[:,0])
+    fpr_test_ft, tpr_test_ft, thresholds_ft = metrics.roc_curve(test_labels_ft[:,0], test_preds_ft[:,0])
     # We've already turned the labels into binary for the Brainwave pass
     fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b,  test_preds_b)
     
     # Use the data we just generated to determine the area under the ROC curve.
-#     auc_test    = metrics.auc(fpr_test_t, tpr_test_t)
-#     auc_test_q  = metrics.auc(fpr_test_q, tpr_test_q)
-#     auc_test_ft = metrics.auc(fpr_test_ft, tpr_test_ft)
+    auc_test    = metrics.auc(fpr_test_t, tpr_test_t)
+    auc_test_q  = metrics.auc(fpr_test_q, tpr_test_q)
+    auc_test_ft = metrics.auc(fpr_test_ft, tpr_test_ft)
     auc_test_b  = metrics.auc(fpr_test_b, tpr_test_b)
 
     # Plot the ROCs, labeling with the AUCs.
 #     %matplotlib inline
     import matplotlib.pyplot as plt
     plt.figure(figsize=(7,5))
-#     plt.plot(tpr_test_t,    fpr_test_t,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
-#     plt.plot(tpr_test_q,  fpr_test_q,  label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
-#     plt.plot(tpr_test_ft, fpr_test_ft, label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
+    plt.plot(tpr_test_t,    fpr_test_t,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
+    plt.plot(tpr_test_q,  fpr_test_q,  label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
+    plt.plot(tpr_test_ft, fpr_test_ft, label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
     plt.plot(tpr_test_b,  fpr_test_b,  label='Custom weights, Brainwave, AUC = %.2f%%'%(auc_test_b*100.))
     
     plt.semilogy()
@@ -440,12 +440,12 @@ def plot_results(results_dir):
         idx = (np.abs(array-value)).argmin()
         return idx
 
-#     idx_t    = find_nearest(tpr_test_t,0.3)
-#     idx_q  = find_nearest(tpr_test_q,0.3)
-#     idx_ft = find_nearest(tpr_test_ft,0.3)
+    idx_t    = find_nearest(tpr_test_t,0.3)
+    idx_q  = find_nearest(tpr_test_q,0.3)
+    idx_ft = find_nearest(tpr_test_ft,0.3)
     idx_b  = find_nearest(tpr_test_b,0.3)
     
-#     print ("Custom weights:", loss_t, accuracy_t, auc_test_t, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
-#     print ("Quantized:", loss_q, accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
-#     print ("Finetuned:", loss_ft, accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
+    print ("Custom weights:", loss_t, accuracy_t, auc_test_t, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
+    print ("Quantized:", loss_q, accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
+    print ("Finetuned:", loss_ft, accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
     print ("Brainwave:", accuracy_b, auc_test_b, tpr_test_b[idx_b], 1./fpr_test_b[idx_b])
