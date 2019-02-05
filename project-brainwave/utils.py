@@ -22,9 +22,10 @@ def image_with_label(train_file, istart,iend):
     import tables
     import numpy as np
     f = tables.open_file(train_file, 'r')
-    a = np.array(f.root.img_pt) # Images
-    b = np.array(f.root.label) # Labels
-    return normalize_and_rgb(a[istart:iend]),b[istart:iend]
+    a = np.array(f.root.img_pt)[istart:iend] # Images
+    b = np.array(f.root.label)[istart:iend] # Labels
+    f.close()
+    return normalize_and_rgb(a),b
 
 def count_events(train_files):
     import tables
@@ -133,6 +134,7 @@ def chunks(files, chunksize):
         f = tables.open_file(train_file, 'r') 
         a = np.array(f.root.img_pt) # Images 
         b = np.array(f.root.label) # Labels 
+        f.close()
         c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)]
         np.random.seed(42) 
         np.random.shuffle(c)
