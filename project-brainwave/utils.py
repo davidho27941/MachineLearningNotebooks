@@ -22,9 +22,10 @@ def image_with_label(train_file, istart,iend):
     import tables
     import numpy as np
     f = tables.open_file(train_file, 'r')
-    a = np.array(f.root.img_pt) # Images
-    b = np.array(f.root.label) # Labels
-    return normalize_and_rgb(a[istart:iend]),b[istart:iend]
+    a = np.array(f.root.img_pt)[istart:iend] # Images
+    b = np.array(f.root.label)[istart:iend] # Labels
+    f.close()
+    return normalize_and_rgb(a),b
 
 def count_events(train_files):
     import tables
@@ -164,21 +165,23 @@ def check_model(preds, features, in_images, train_files, classifier):
                                    in_labels: b,
                                    K.learning_phase(): 0}))
     
-def chunks(files, chunksize): 
+def chunks(files, chunksize, max_q_size=4): 
     """Yield successive n-sized chunks from a and b.""" 
     import tables
     import numpy as np
     for train_file in files: 
         f = tables.open_file(train_file, 'r') 
-        a = np.array(f.root.img_pt) # Images 
-        b = np.array(f.root.label) # Labels 
-        c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)]
-        np.random.shuffle(c)
-        test_images = c[:, :a.size//len(a)].reshape(a.shape)
-        test_labels = c[:, a.size//len(a):].reshape(b.shape)
-
-        for istart in range(0,test_images.shape[0],chunksize):  
-            yield normalize_and_rgb(test_images[istart:istart+chunksize]),test_labels[istart:istart+chunksize], len(test_labels[istart:istart+chunksize])
+        nrows = f.root.label.nrows
+        for istart in range(0,nrows,max_q_size*chunksize):  
+            a = np.array(f.root.img_pt[istart:istart+max_q_size*chunksize]) # Images 
+            b = np.array(f.root.label[istart:istart+max_q_size*chunksize]) # Labels 
+            c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)] # shuffle within queue size
+            np.random.shuffle(c)
+            test_images = c[:, :a.size//len(a)].reshape(a.shape)
+            test_labels = c[:, a.size//len(a):].reshape(b.shape)
+            for jstart in range(0,len(test_labels),chunksize): 
+                yield normalize_and_rgb(test_images[jstart:jstart+chunksize]),test_labels[jstart:jstart+chunksize], len(test_labels[jstart:jstart+chunksize])  
+        f.close()
 
 def train_model(preds, in_images, train_files, val_files, is_retrain = False, train_epoch = 10, classifier=None, saver=None, checkpoint_path=None): 
     """ training model """ 
@@ -238,7 +241,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     # Merge all summaries into a single op
     merged_summary_op = tf.summary.merge_all()
 
-    chunk_size = 32
+    chunk_size = 64
     n_train_events = count_events(train_files)
     train_chunk_num = int(n_train_events / chunk_size)+1
     
