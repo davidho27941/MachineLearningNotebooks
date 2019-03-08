@@ -241,7 +241,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     # Merge all summaries into a single op
     merged_summary_op = tf.summary.merge_all()
 
-    chunk_size = 64
+    chunk_size = 32
     n_train_events = count_events(train_files)
     train_chunk_num = int(n_train_events / chunk_size)+1
     
@@ -311,8 +311,8 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
         val_auc_over_epoch.append(avg_val_auc)
         
         if saver is not None and checkpoint_path is not None and classifier is not None:
-            saver.save(sess, checkpoint_path+'/resnet50_bw', write_meta_graph=False, global_step = epoch)
-            saver.save(sess, checkpoint_path+'/resnet50_bw', write_meta_graph=False)
+            saver.save(sess, checkpoint_path+'/resnet50_bw', write_meta_graph=True, global_step = epoch)
+            saver.save(sess, checkpoint_path+'/resnet50_bw', write_meta_graph=True)
             classifier.save_weights(checkpoint_path+'/class_weights-%s.h5'%epoch)
             classifier.save(checkpoint_path+'/class_model-%s.h5'%epoch)
             classifier.save_weights(checkpoint_path+'/class_weights.h5')
@@ -320,7 +320,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
             if avg_val_loss < best_val_loss:
                 print("new best model")
                 best_val_loss = avg_val_loss
-                saver.save(sess, checkpoint_path+'/resnet50_bw_best', write_meta_graph=False)
+                saver.save(sess, checkpoint_path+'/resnet50_bw_best', write_meta_graph=True)
                 classifier.save_weights(checkpoint_path+'/class_weights_best.h5')
                 classifier.save(checkpoint_path+'/class_model_best.h5')
                 
