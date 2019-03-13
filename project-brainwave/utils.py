@@ -37,20 +37,23 @@ def count_events(train_files):
 
 # Create a heatmap of the training file hits.
 # Useful for visually confirming the data is well-distributed.
-def test_heatmap(train_files):
+def test_heatmap(train_files, size=224):
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    a, b = image_with_label(train_files[0],0,20000)
+    import numpy as np
+    
+    a, b = image_with_label(train_files[0],0,200)
+    a = a[0:200:100]
+    b = b[0:200:100]
+    print(b)
     new_a = np.swapaxes(a[:,:,:,0],0,2)
     new_a = np.swapaxes(new_a,0,1)
     c = np.dot(new_a,b[:,0])
     d = np.dot(new_a,b[:,1])
-#     %matplotlib inline
-    #mpl.use('agg')
 
-    width = 64
-    height = 64
-    fontsize = 120
+    width = size
+    height = size
+    fontsize = 120*size/64
 
     plt.figure(figsize=(width,height))
     ax = plt.subplot() 
@@ -74,20 +77,23 @@ def test_heatmap(train_files):
     plt.ylabel(r'$i\phi$', fontsize=fontsize)
     plt.savefig('QCD.pdf')
 
-def preprocess_images():
+def preprocess_images(size=64):
     import tensorflow as tf
     # Create a placeholder for our incoming images
+    in_height = size
+    in_width = size
     in_images = tf.placeholder(tf.float32)
-    in_height = 64
-    in_width = 64
     in_images.set_shape([None, in_height, in_width, 3])
     
     # Resize those images to fit our featurizer
-    out_width = 224
-    out_height = 224
-    image_tensors = tf.image.resize_images(in_images, [out_height,out_width])
-    image_tensors = tf.to_float(image_tensors)
-    
+    if size==64:
+        out_width = 224
+        out_height = 224
+        image_tensors = tf.image.resize_images(in_images, [out_height,out_width])
+        image_tensors = tf.to_float(image_tensors)
+    elif size==224:
+        image_tensors = in_images
+        
     return in_images, image_tensors
 
 def construct_classifier():
@@ -101,8 +107,7 @@ def construct_classifier():
     NUM_CLASSES = 2
 
     in_layer = Input(shape=(1, 1, 2048,),name='input_1')
-    x = Dropout(0.2, input_shape=(1, 1, 2048,),name='dropout_1')(in_layer)
-    x = Dense(FC_SIZE, activation='relu', input_dim=(1, 1, 2048,),name='dense_1')(x)
+    x = Dense(FC_SIZE, activation='relu', input_dim=(1, 1, 2048,),name='dense_1')(in_layer)
     x = Flatten(name='flatten_1')(x)
     preds = Dense(NUM_CLASSES, activation='softmax', input_dim=FC_SIZE, name='classifier_output')(x)
     
@@ -110,13 +115,13 @@ def construct_classifier():
     
     return model
 
-def construct_model(quantized, saved_model_dir = None, starting_weights_directory = None, is_frozen=False, is_training=True):
+def construct_model(quantized, saved_model_dir=None, starting_weights_directory=None, is_frozen=False, is_training=True, size=64):
     from azureml.contrib.brainwave.models import Resnet50, QuantizedResnet50
     import tensorflow as tf
     from keras import backend as K
     
     # Convert images to 3D tensors [width,height,channel]
-    in_images, image_tensors = preprocess_images()
+    in_images, image_tensors = preprocess_images(size=size)
 
     # Construct featurizer using quantized or unquantized ResNet50 model
     
@@ -180,10 +185,10 @@ def chunks(files, chunksize, max_q_size=4):
             test_images = c[:, :a.size//len(a)].reshape(a.shape)
             test_labels = c[:, a.size//len(a):].reshape(b.shape)
             for jstart in range(0,len(test_labels),chunksize): 
-                yield normalize_and_rgb(test_images[jstart:jstart+chunksize]),test_labels[jstart:jstart+chunksize], len(test_labels[jstart:jstart+chunksize])  
+                yield normalize_and_rgb(test_images[jstart:jstart+chunksize].copy()),test_labels[jstart:jstart+chunksize].copy(), len(test_labels[jstart:jstart+chunksize].copy())  
         f.close()
 
-def train_model(preds, in_images, train_files, val_files, is_retrain = False, train_epoch = 10, classifier=None, saver=None, checkpoint_path=None): 
+def train_model(preds, in_images, train_files, val_files, is_retrain = False, train_epoch = 10, classifier=None, saver=None, checkpoint_path=None, chunk_size=64): 
     """ training model """ 
     import tensorflow as tf
     from keras import backend as K
@@ -191,7 +196,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     from keras.metrics import categorical_accuracy 
     from tqdm import tqdm
 
-    learning_rate = 0.001 if is_retrain else 0.01
+    learning_rate = 0.0001 if is_retrain else 0.001
 
     # Specify the loss function
     in_labels = tf.placeholder(tf.float32, shape=(None, 2))   
@@ -199,10 +204,9 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
         cross_entropy = tf.reduce_mean(binary_crossentropy(in_labels, preds))
         
     with tf.name_scope('train'):  
-        #optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
+        #optimizer_def = tf.train.GradientDescentOptimizer(learning_rate)
         #momentum = 0.9
         #optimizer_def = tf.train.MomentumOptimizer(learning_rate, momentum, use_nesterov=True)
-        #optimizer = optimizer_def.minimize(cross_entropy)
         optimizer_def = tf.train.AdamOptimizer(learning_rate)
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
@@ -227,9 +231,11 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     # create a summary to look at input images
     tf.summary.image("images", in_images, 3)
     
-    # Create summaries to visualize weights
-    #for var in tf.trainable_variables():
-    #    tf.summary.histogram(var.name.replace(':','_'), var)
+    # Create summaries to visualize batchnorm variables
+    tensors_per_node = [node.values() for node in tf.get_default_graph().get_operations()]
+    bn_tensors = [tensor for tensors in tensors_per_node for tensor in tensors if 'BatchNorm/moving_mean:0' in tensor.name or 'BatchNorm/moving_variance:0' in tensor.name or  'BatchNorm/gamma:0' in tensor.name or 'BatchNorm/beta:0' in tensor.name]
+    for var in bn_tensors:
+        tf.summary.histogram(var.name.replace(':','_'), var)
         
     #grads = tf.gradients(cross_entropy, tf.trainable_variables())
     #grads = list(zip(grads, tf.trainable_variables()))
@@ -241,7 +247,6 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     # Merge all summaries into a single op
     merged_summary_op = tf.summary.merge_all()
 
-    chunk_size = 32
     n_train_events = count_events(train_files)
     train_chunk_num = int(n_train_events / chunk_size)+1
     
@@ -256,6 +261,8 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
     val_accuracy_over_epoch = []
     val_auc_over_epoch = []
     best_val_loss = 999999
+    
+    is_training = tf.get_default_graph().get_tensor_by_name('is_training:0')
 
     for epoch in range(train_epoch):
         avg_loss = 0
@@ -271,7 +278,8 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
                                                                       accuracy, auc],
                             feed_dict={in_images: img_chunk,
                                        in_labels: label_chunk,
-                                       K.learning_phase(): 1})
+                                       K.learning_phase(): 1,
+                                       is_training: True})
             avg_loss += loss * real_chunk_size / n_train_events
             avg_accuracy += accuracy_result * real_chunk_size / n_train_events
             avg_auc += auc_result[0] * real_chunk_size / n_train_events
@@ -292,11 +300,13 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
         avg_val_accuracy = 0
         avg_val_auc = 0
         i = 0
+        
         for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(val_files, chunk_size),total=val_chunk_num):
             val_loss, val_accuracy_result, val_auc_result, summary = sess.run([cross_entropy, accuracy, auc, merged_summary_op],
                                 feed_dict={in_images: img_chunk,
                                            in_labels: label_chunk,
-                                           K.learning_phase(): 0})
+                                           K.learning_phase(): 0,
+                                           is_training: False})
             avg_val_loss += val_loss * real_chunk_size / n_val_events
             avg_val_accuracy += val_accuracy_result * real_chunk_size / n_val_events
             avg_val_auc += val_auc_result[0] * real_chunk_size / n_val_events
@@ -327,7 +337,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
         
     return loss_over_epoch, accuracy_over_epoch, auc_over_epoch, val_loss_over_epoch, val_accuracy_over_epoch, val_auc_over_epoch
 
-def test_model(preds, in_images, test_files):
+def test_model(preds, in_images, test_files, chunk_size=64):
     """Test the model"""
     import tensorflow as tf
     from keras import backend as K
@@ -342,7 +352,6 @@ def test_model(preds, in_images, test_files):
     accuracy = tf.reduce_mean(categorical_accuracy(in_labels, preds))
     auc = tf.metrics.auc(tf.cast(in_labels, tf.bool), preds)
    
-    chunk_size = 64
     n_test_events = count_events(test_files)
     chunk_num = int(n_test_events/chunk_size)+1
     preds_all = []
@@ -354,11 +363,13 @@ def test_model(preds, in_images, test_files):
     avg_accuracy = 0
     avg_auc = 0
     avg_test_loss = 0
+    is_training = tf.get_default_graph().get_tensor_by_name('is_training:0')
     for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(test_files, chunk_size),total=chunk_num):
         test_loss, accuracy_result, auc_result, preds_result = sess.run([cross_entropy, accuracy, auc, preds],
                         feed_dict={in_images: img_chunk,
                                    in_labels: label_chunk,
-                                   K.learning_phase(): 0})
+                                   K.learning_phase(): 0,
+                                   is_training: False})
         avg_test_loss += test_loss * real_chunk_size / n_test_events
         avg_accuracy += accuracy_result * real_chunk_size / n_test_events
         avg_auc += auc_result[0]  * real_chunk_size / n_test_events 
@@ -402,53 +413,62 @@ def plot_results(results_dir):
     accuracy_ft     = np.load(results_dir + "/ft_accuracy.npy")
     test_labels_ft = np.load(results_dir + "/ft_labels.npy")
     test_preds_ft  = np.load(results_dir + "/ft_preds.npy")
-    accuracy_b     = np.load(results_dir + "/b_accuracy.npy")
-    test_labels_b  = np.load(results_dir + "/b_labels.npy")
-    test_preds_b   = np.load(results_dir + "/b_preds.npy")
+    #accuracy_b     = np.load(results_dir + "/b_accuracy.npy")
+    #test_labels_b = np.load(results_dir + "/b_labels.npy")
+    #test_preds_b  = np.load(results_dir + "/b_preds.npy")
+    
     
     # Determine the ROC curve for each of the tests. 
     # [:,0] will convert the labels from one-hot to binary.
     fpr_test_t, tpr_test_t, thresholds      = metrics.roc_curve(test_labels_t[:,0],  test_preds_t[:,0])
     fpr_test_q, tpr_test_q, thresholds_q    = metrics.roc_curve(test_labels_q[:,0],  test_preds_q[:,0])
-    fpr_test_ft, tpr_test_ft, thresholds_ft = metrics.roc_curve(test_labels_ft[:,0], test_preds_ft[:,0])
-    # We've already turned the labels into binary for the Brainwave pass
-    fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b,  test_preds_b)
+    fpr_test_ft, tpr_test_ft, thresholds_ft    = metrics.roc_curve(test_labels_ft[:,0],  test_preds_ft[:,0])
+    #fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b[:,0],  test_preds_b[:,0])
     
+    # Use the data we just generated to determine the area under the ROC curve.
     # Use the data we just generated to determine the area under the ROC curve.
     auc_test    = metrics.auc(fpr_test_t, tpr_test_t)
     auc_test_q  = metrics.auc(fpr_test_q, tpr_test_q)
-    auc_test_ft = metrics.auc(fpr_test_ft, tpr_test_ft)
-    auc_test_b  = metrics.auc(fpr_test_b, tpr_test_b)
-
-    # Plot the ROCs, labeling with the AUCs.
-#     %matplotlib inline
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(7,5))
-    plt.plot(tpr_test_t,    fpr_test_t,    label='Custom weights, AUC = %.2f%%'%(auc_test*100.))
-    plt.plot(tpr_test_q,  fpr_test_q,  label='Custom weights, quantized, AUC = %.2f%%'%(auc_test_q*100.))
-    plt.plot(tpr_test_ft, fpr_test_ft, label='Custom weights, quantized, fine-tuned, AUC = %.2f%%'%(auc_test_ft*100.))
-    plt.plot(tpr_test_b,  fpr_test_b,  label='Custom weights, Brainwave, AUC = %.2f%%'%(auc_test_b*100.))
+    auc_test_ft  = metrics.auc(fpr_test_ft, tpr_test_ft)
+    #auc_test_b  = metrics.auc(fpr_test_ft, tpr_test_b)
     
-    plt.semilogy()
-    plt.xlabel("Signal efficiency")
-    plt.ylabel("Background efficiency")
-    plt.ylim(0.00001,1)
-    plt.xlim(0,1)
-    plt.grid(True)
-    plt.legend(loc='upper left')
-    plt.savefig('ROC_ft.pdf')
-
     # Find the true positive rate of 30% and 1 over the false positive rate at tpr = 30%.
     def find_nearest(array,value):
         idx = (np.abs(array-value)).argmin()
         return idx
 
     idx_t    = find_nearest(tpr_test_t,0.3)
-    idx_q  = find_nearest(tpr_test_q,0.3)
-    idx_ft = find_nearest(tpr_test_ft,0.3)
-    idx_b  = find_nearest(tpr_test_b,0.3)
+    idx_q    = find_nearest(tpr_test_q,0.3)
+    idx_ft   = find_nearest(tpr_test_ft,0.3)
+    #idx_b    = find_nearest(tpr_test_b,0.3)
     
-    print ("Custom weights:", loss_t, accuracy_t, auc_test_t, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
-    print ("Quantized:", loss_q, accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
-    print ("Finetuned:", loss_ft, accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
-    print ("Brainwave:", accuracy_b, auc_test_b, tpr_test_b[idx_b], 1./fpr_test_b[idx_b])
+    # Plot the ROCs, labeling with the AUCs.
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(7,5))
+    plt.plot(tpr_test_t, fpr_test_t, label=r'Floating point: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test*100., accuracy_t*100, 1./fpr_test_t[idx_t]))
+    plt.plot(tpr_test_q, fpr_test_q, label=r'Quantized: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_q*100., accuracy_q*100, 1./fpr_test_q[idx_q]))
+    plt.plot(tpr_test_ft, fpr_test_ft, label=r'Quantized, fine-tuned: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_ft*100., accuracy_ft*100, 1./fpr_test_ft[idx_ft]))
+    #plt.plot(tpr_test_b, fpr_test_b, label=r'Brainwave: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_b*100., accuracy_b*100, 1./fpr_test_b[idx_b]))
+    plt.semilogy()
+    plt.xlabel("Signal efficiency",fontsize='x-large')
+    plt.ylabel("Background efficiency",fontsize='x-large')
+    plt.ylim(0.0001,1)
+    plt.xlim(0,1)
+    plt.grid(True)
+    plt.legend(loc='upper left',fontsize='medium')
+    plt.savefig(results_dir+'/ROC_ft.pdf')
+    
+    #plt.figure()
+    #plt.hist(test_preds_t[:,0], weights=test_labels_t[:,0], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_t[:,0], weights=test_labels_t[:,1], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_q[:,0], weights=test_labels_q[:,0], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_q[:,0], weights=test_labels_q[:,1], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_ft[:,0], weights=test_labels_ft[:,0], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_ft[:,0], weights=test_labels_ft[:,1], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_b[:,0], weights=test_labels_b[:,0], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+    #plt.hist(test_preds_b[:,0], weights=test_labels_b[:,1], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
+
+    print ("Floating Point", accuracy_t, auc_test, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
+    print ("Quantized     ", accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
+    print ("Quantized, fine-tuned", accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
+    #print ("Brainwave", accuracy_b, auc_test_b, tpr_test_ft[idx_b], 1./fpr_test_ft[idx_b])
