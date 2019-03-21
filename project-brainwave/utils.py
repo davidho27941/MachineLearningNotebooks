@@ -170,7 +170,7 @@ def check_model(preds, features, in_images, train_files, classifier):
                                    in_labels: b,
                                    K.learning_phase(): 0}))
     
-def chunks(files, chunksize, max_q_size=4): 
+def chunks(files, chunksize, max_q_size=4, shuffle=True): 
     """Yield successive n-sized chunks from a and b.""" 
     import tables
     import numpy as np
@@ -180,10 +180,14 @@ def chunks(files, chunksize, max_q_size=4):
         for istart in range(0,nrows,max_q_size*chunksize):  
             a = np.array(f.root.img_pt[istart:istart+max_q_size*chunksize]) # Images 
             b = np.array(f.root.label[istart:istart+max_q_size*chunksize]) # Labels 
-            c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)] # shuffle within queue size
-            np.random.shuffle(c)
-            test_images = c[:, :a.size//len(a)].reshape(a.shape)
-            test_labels = c[:, a.size//len(a):].reshape(b.shape)
+            if shuffle: 
+                c = np.c_[a.reshape(len(a), -1), b.reshape(len(b), -1)] # shuffle within queue size
+                np.random.shuffle(c)
+                test_images = c[:, :a.size//len(a)].reshape(a.shape)
+                test_labels = c[:, a.size//len(a):].reshape(b.shape)
+            else:
+                test_images = a
+                test_labels = b
             for jstart in range(0,len(test_labels),chunksize): 
                 yield normalize_and_rgb(test_images[jstart:jstart+chunksize].copy()),test_labels[jstart:jstart+chunksize].copy(), len(test_labels[jstart:jstart+chunksize].copy())  
         f.close()
@@ -337,7 +341,7 @@ def train_model(preds, in_images, train_files, val_files, is_retrain = False, tr
         
     return loss_over_epoch, accuracy_over_epoch, auc_over_epoch, val_loss_over_epoch, val_accuracy_over_epoch, val_auc_over_epoch
 
-def test_model(preds, in_images, test_files, chunk_size=64):
+def test_model(preds, in_images, test_files, chunk_size=64, shuffle=True):
     """Test the model"""
     import tensorflow as tf
     from keras import backend as K
@@ -364,7 +368,7 @@ def test_model(preds, in_images, test_files, chunk_size=64):
     avg_auc = 0
     avg_test_loss = 0
     is_training = tf.get_default_graph().get_tensor_by_name('is_training:0')
-    for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(test_files, chunk_size),total=chunk_num):
+    for img_chunk, label_chunk, real_chunk_size in tqdm(chunks(test_files, chunk_size, shuffle=shuffle),total=chunk_num):
         test_loss, accuracy_result, auc_result, preds_result = sess.run([cross_entropy, accuracy, auc, preds],
                         feed_dict={in_images: img_chunk,
                                    in_labels: label_chunk,
@@ -398,7 +402,7 @@ def save_results(results_dir, prefix, accuracy, labels, preds):
 # Once results have been compiled, use this function to plot them.
 # It expects all the files to be there at runtime, so if they haven't yet been generated,
 # comment out the relevant lines.
-def plot_results(results_dir):
+def plot_results(results_dir,plot_label='ROC.pdf'):
     import os
     import numpy as np
     from sklearn import metrics
@@ -413,24 +417,43 @@ def plot_results(results_dir):
     accuracy_ft     = np.load(results_dir + "/ft_accuracy.npy")
     test_labels_ft = np.load(results_dir + "/ft_labels.npy")
     test_preds_ft  = np.load(results_dir + "/ft_preds.npy")
-    #accuracy_b     = np.load(results_dir + "/b_accuracy.npy")
-    #test_labels_b = np.load(results_dir + "/b_labels.npy")
-    #test_preds_b  = np.load(results_dir + "/b_preds.npy")
-    
+    accuracy_b     = np.load(results_dir + "/b_accuracy.npy")
+    test_labels_b = np.load(results_dir + "/b_labels.npy")
+    test_preds_b  = np.load(results_dir + "/b_preds.npy")
+
+    new_test_preds_t = np.zeros(test_preds_t.shape)
+    new_test_preds_t[:,0] = test_preds_t[:,0]/np.sum(test_preds_t,axis=1)
+    new_test_preds_t[:,1] = test_preds_t[:,1]/np.sum(test_preds_t,axis=1)
+    test_preds_t = new_test_preds_t
+
+    new_test_preds_q = np.zeros(test_preds_q.shape)
+    new_test_preds_q[:,0] = test_preds_q[:,0]/np.sum(test_preds_q,axis=1)
+    new_test_preds_q[:,1] = test_preds_q[:,1]/np.sum(test_preds_q,axis=1)
+    test_preds_q = new_test_preds_q
+
+    new_test_preds_ft = np.zeros(test_preds_ft.shape)
+    new_test_preds_ft[:,0] = test_preds_ft[:,0]/np.sum(test_preds_ft,axis=1)
+    new_test_preds_ft[:,1] = test_preds_ft[:,1]/np.sum(test_preds_ft,axis=1)
+    test_preds_ft = new_test_preds_ft
+
+    new_test_preds_b = np.zeros(test_preds_b.shape)
+    new_test_preds_b[:,0] = test_preds_b[:,0]/np.sum(test_preds_b,axis=1)
+    new_test_preds_b[:,1] = test_preds_b[:,1]/np.sum(test_preds_b,axis=1)
+    test_preds_b = new_test_preds_b
     
     # Determine the ROC curve for each of the tests. 
     # [:,0] will convert the labels from one-hot to binary.
     fpr_test_t, tpr_test_t, thresholds      = metrics.roc_curve(test_labels_t[:,0],  test_preds_t[:,0])
     fpr_test_q, tpr_test_q, thresholds_q    = metrics.roc_curve(test_labels_q[:,0],  test_preds_q[:,0])
     fpr_test_ft, tpr_test_ft, thresholds_ft    = metrics.roc_curve(test_labels_ft[:,0],  test_preds_ft[:,0])
-    #fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b[:,0],  test_preds_b[:,0])
+    fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b[:,0],  test_preds_b[:,0])
     
     # Use the data we just generated to determine the area under the ROC curve.
     # Use the data we just generated to determine the area under the ROC curve.
     auc_test    = metrics.auc(fpr_test_t, tpr_test_t)
     auc_test_q  = metrics.auc(fpr_test_q, tpr_test_q)
     auc_test_ft  = metrics.auc(fpr_test_ft, tpr_test_ft)
-    #auc_test_b  = metrics.auc(fpr_test_ft, tpr_test_b)
+    auc_test_b  = metrics.auc(fpr_test_b, tpr_test_b)
     
     # Find the true positive rate of 30% and 1 over the false positive rate at tpr = 30%.
     def find_nearest(array,value):
@@ -440,24 +463,24 @@ def plot_results(results_dir):
     idx_t    = find_nearest(tpr_test_t,0.3)
     idx_q    = find_nearest(tpr_test_q,0.3)
     idx_ft   = find_nearest(tpr_test_ft,0.3)
-    #idx_b    = find_nearest(tpr_test_b,0.3)
+    idx_b    = find_nearest(tpr_test_b,0.3)
     
     # Plot the ROCs, labeling with the AUCs.
     import matplotlib.pyplot as plt
     plt.figure(figsize=(7,5))
     plt.plot(tpr_test_t, fpr_test_t, label=r'Floating point: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test*100., accuracy_t*100, 1./fpr_test_t[idx_t]))
-    plt.plot(tpr_test_q, fpr_test_q, label=r'Quantized: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_q*100., accuracy_q*100, 1./fpr_test_q[idx_q]))
-    plt.plot(tpr_test_ft, fpr_test_ft, label=r'Quantized, fine-tuned: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_ft*100., accuracy_ft*100, 1./fpr_test_ft[idx_ft]))
-    #plt.plot(tpr_test_b, fpr_test_b, label=r'Brainwave: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_b*100., accuracy_b*100, 1./fpr_test_b[idx_b]))
+    plt.plot(tpr_test_q, fpr_test_q, linestyle='--', label=r'Quant.: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_q*100., accuracy_q*100, 1./fpr_test_q[idx_q]))
+    plt.plot(tpr_test_ft, fpr_test_ft, linestyle='-.', label=r'Quant., fine-tune: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_ft*100., accuracy_ft*100, 1./fpr_test_ft[idx_ft]))
+    plt.plot(tpr_test_b, fpr_test_b, linestyle=':',label=r'Brainwave: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_b*100., accuracy_b*100, 1./fpr_test_b[idx_b]))
     plt.semilogy()
     plt.xlabel("Signal efficiency",fontsize='x-large')
     plt.ylabel("Background efficiency",fontsize='x-large')
     plt.ylim(0.0001,1)
     plt.xlim(0,1)
     plt.grid(True)
-    plt.legend(loc='upper left',fontsize='medium')
-    plt.savefig(results_dir+'/ROC_ft.pdf')
-    
+    plt.legend(loc='upper left',fontsize=11.8)
+    plt.tight_layout()
+    plt.savefig(results_dir+'/'+plot_label)    
     #plt.figure()
     #plt.hist(test_preds_t[:,0], weights=test_labels_t[:,0], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
     #plt.hist(test_preds_t[:,0], weights=test_labels_t[:,1], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
@@ -471,4 +494,4 @@ def plot_results(results_dir):
     print ("Floating Point", accuracy_t, auc_test, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
     print ("Quantized     ", accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
     print ("Quantized, fine-tuned", accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
-    #print ("Brainwave", accuracy_b, auc_test_b, tpr_test_ft[idx_b], 1./fpr_test_ft[idx_b])
+    print ("Brainwave", accuracy_b, auc_test_b, tpr_test_b[idx_b], 1./fpr_test_b[idx_b])
