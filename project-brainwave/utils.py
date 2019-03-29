@@ -22,8 +22,8 @@ def image_with_label(train_file, istart,iend):
     import tables
     import numpy as np
     f = tables.open_file(train_file, 'r')
-    a = np.array(f.root.img_pt)[istart:iend] # Images
-    b = np.array(f.root.label)[istart:iend] # Labels
+    a = np.array(f.root.img_pt)[istart:iend].copy() # Images
+    b = np.array(f.root.label)[istart:iend].copy() # Labels
     f.close()
     return normalize_and_rgb(a),b
 
@@ -33,6 +33,7 @@ def count_events(train_files):
     for train_file in train_files:
         f = tables.open_file(train_file, 'r')
         n_events += f.root.label.shape[0]
+        f.close()
     return n_events
 
 # Create a heatmap of the training file hits.
@@ -392,12 +393,14 @@ def test_model(preds, in_images, test_files, chunk_size=64, shuffle=True):
 #   Quantized testing before fine-tuning should be prefixed 'q'
 #   Quantized testing after fine-tuning should be prefixed 'ft'
 #   Quantized testing on Brainwave should be prefixed 'b'
-def save_results(results_dir, prefix, accuracy, labels, preds):
+def save_results(results_dir, prefix, accuracy, labels, preds, feats=None):
     import numpy as np
     
     np.save(results_dir + "/" + prefix + "_accuracy.npy", accuracy)
     np.save(results_dir + "/" + prefix + "_labels.npy", labels)
     np.save(results_dir + "/" + prefix + "_preds.npy", preds)
+    if feats is not None:
+        np.save(results_dir + "/" + prefix + "_feats.npy", feats)
     
 # Once results have been compiled, use this function to plot them.
 # It expects all the files to be there at runtime, so if they haven't yet been generated,
@@ -408,18 +411,17 @@ def plot_results(results_dir,plot_label='ROC.pdf'):
     from sklearn import metrics
 
     # Load the labels and results into memory.
-    accuracy_t     = np.load(results_dir + "/t_accuracy.npy")
     test_labels_t  = np.load(results_dir + "/t_labels.npy")
     test_preds_t   = np.load(results_dir + "/t_preds.npy")
     accuracy_q     = np.load(results_dir + "/q_accuracy.npy")
     test_labels_q  = np.load(results_dir + "/q_labels.npy")
     test_preds_q   = np.load(results_dir + "/q_preds.npy")
-    accuracy_ft     = np.load(results_dir + "/ft_accuracy.npy")
     test_labels_ft = np.load(results_dir + "/ft_labels.npy")
     test_preds_ft  = np.load(results_dir + "/ft_preds.npy")
-    accuracy_b     = np.load(results_dir + "/b_accuracy.npy")
     test_labels_b = np.load(results_dir + "/b_labels.npy")
     test_preds_b  = np.load(results_dir + "/b_preds.npy")
+    test_labels_b_ft = np.load(results_dir + "/b_labels.npy")
+    test_preds_b_ft  = np.load(results_dir + "/b_newpreds.npy")
 
     new_test_preds_t = np.zeros(test_preds_t.shape)
     new_test_preds_t[:,0] = test_preds_t[:,0]/np.sum(test_preds_t,axis=1)
@@ -441,12 +443,24 @@ def plot_results(results_dir,plot_label='ROC.pdf'):
     new_test_preds_b[:,1] = test_preds_b[:,1]/np.sum(test_preds_b,axis=1)
     test_preds_b = new_test_preds_b
     
+    new_test_preds_b_ft = np.zeros(test_preds_b_ft.shape)
+    new_test_preds_b_ft[:,0] = test_preds_b_ft[:,0]/np.sum(test_preds_b_ft,axis=1)
+    new_test_preds_b_ft[:,1] = test_preds_b_ft[:,1]/np.sum(test_preds_b_ft,axis=1)
+    test_preds_b_ft = new_test_preds_b_ft
+    
+    accuracy_t = metrics.accuracy_score(test_labels_t[:,0], test_preds_t[:,0]>0.5)
+    accuracy_q = metrics.accuracy_score(test_labels_q[:,0], test_preds_q[:,0]>0.5)
+    accuracy_ft = metrics.accuracy_score(test_labels_ft[:,0], test_preds_ft[:,0]>0.5)
+    accuracy_b = metrics.accuracy_score(test_labels_b[:,0], test_preds_b[:,0]>0.5)
+    accuracy_b_ft = metrics.accuracy_score(test_labels_b_ft[:,0], test_preds_b_ft[:,0]>0.5)
+
     # Determine the ROC curve for each of the tests. 
     # [:,0] will convert the labels from one-hot to binary.
     fpr_test_t, tpr_test_t, thresholds      = metrics.roc_curve(test_labels_t[:,0],  test_preds_t[:,0])
     fpr_test_q, tpr_test_q, thresholds_q    = metrics.roc_curve(test_labels_q[:,0],  test_preds_q[:,0])
     fpr_test_ft, tpr_test_ft, thresholds_ft    = metrics.roc_curve(test_labels_ft[:,0],  test_preds_ft[:,0])
     fpr_test_b, tpr_test_b, thresholds_b    = metrics.roc_curve(test_labels_b[:,0],  test_preds_b[:,0])
+    fpr_test_b_ft, tpr_test_b_ft, thresholds_b_ft    = metrics.roc_curve(test_labels_b_ft[:,0],  test_preds_b_ft[:,0])
     
     # Use the data we just generated to determine the area under the ROC curve.
     # Use the data we just generated to determine the area under the ROC curve.
@@ -454,6 +468,7 @@ def plot_results(results_dir,plot_label='ROC.pdf'):
     auc_test_q  = metrics.auc(fpr_test_q, tpr_test_q)
     auc_test_ft  = metrics.auc(fpr_test_ft, tpr_test_ft)
     auc_test_b  = metrics.auc(fpr_test_b, tpr_test_b)
+    auc_test_b_ft  = metrics.auc(fpr_test_b_ft, tpr_test_b_ft)
     
     # Find the true positive rate of 30% and 1 over the false positive rate at tpr = 30%.
     def find_nearest(array,value):
@@ -464,14 +479,16 @@ def plot_results(results_dir,plot_label='ROC.pdf'):
     idx_q    = find_nearest(tpr_test_q,0.3)
     idx_ft   = find_nearest(tpr_test_ft,0.3)
     idx_b    = find_nearest(tpr_test_b,0.3)
+    idx_b_ft    = find_nearest(tpr_test_b_ft,0.3)
     
     # Plot the ROCs, labeling with the AUCs.
     import matplotlib.pyplot as plt
     plt.figure(figsize=(7,5))
     plt.plot(tpr_test_t, fpr_test_t, label=r'Floating point: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test*100., accuracy_t*100, 1./fpr_test_t[idx_t]))
     plt.plot(tpr_test_q, fpr_test_q, linestyle='--', label=r'Quant.: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_q*100., accuracy_q*100, 1./fpr_test_q[idx_q]))
-    plt.plot(tpr_test_ft, fpr_test_ft, linestyle='-.', label=r'Quant., fine-tune: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_ft*100., accuracy_ft*100, 1./fpr_test_ft[idx_ft]))
+    plt.plot(tpr_test_ft, fpr_test_ft, linestyle='-.', label=r'Quant., f.t.: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_ft*100., accuracy_ft*100, 1./fpr_test_ft[idx_ft]))
     plt.plot(tpr_test_b, fpr_test_b, linestyle=':',label=r'Brainwave: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_b*100., accuracy_b*100, 1./fpr_test_b[idx_b]))
+    plt.plot(tpr_test_b_ft, fpr_test_b_ft, linestyle=':',label=r'Brainwave, f.t.: AUC = %.1f%%, acc. = %.1f%%, $1/\epsilon_{B}$ = %.0f'%(auc_test_b_ft*100., accuracy_b_ft*100, 1./fpr_test_b_ft[idx_b_ft]))
     plt.semilogy()
     plt.xlabel("Signal efficiency",fontsize='x-large')
     plt.ylabel("Background efficiency",fontsize='x-large')
@@ -491,7 +508,8 @@ def plot_results(results_dir,plot_label='ROC.pdf'):
     #plt.hist(test_preds_b[:,0], weights=test_labels_b[:,0], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
     #plt.hist(test_preds_b[:,0], weights=test_labels_b[:,1], bins=np.linspace(0, 1, 40), density=True, alpha = 0.7)
 
-    print ("Floating Point", accuracy_t, auc_test, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
+    print ("Floating point", accuracy_t, auc_test, tpr_test_t[idx_t], 1./fpr_test_t[idx_t])
     print ("Quantized     ", accuracy_q, auc_test_q, tpr_test_q[idx_q], 1./fpr_test_q[idx_q])
-    print ("Quantized, fine-tuned", accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
+    print ("Quantized, f.t.", accuracy_ft, auc_test_ft, tpr_test_ft[idx_ft], 1./fpr_test_ft[idx_ft])
     print ("Brainwave", accuracy_b, auc_test_b, tpr_test_b[idx_b], 1./fpr_test_b[idx_b])
+    print ("Brainwave, f.t.", accuracy_b_ft, auc_test_b_ft, tpr_test_b_ft[idx_b_ft], 1./fpr_test_b_ft[idx_b_ft])

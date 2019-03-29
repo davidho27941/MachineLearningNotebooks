@@ -14,7 +14,7 @@ files = ['class_model_best.h5',
 os.system('mkdir -p %s'%outdir)
 
 for file in files:
-    os.system('cp %s/%s %s/%s'%(indir, file, outdir, file.replace('_best',''))
+    os.system('cp %s/%s %s/%s'%(indir, file, outdir, file.replace('_best','')))
 
 with open('%s/checkpoint'%outdir,'w') as f:
     f.write('model_checkpoint_path: "resnet50_bw"\n')
