@@ -146,8 +146,8 @@ def construct_model(quantized, saved_model_dir=None, starting_weights_directory=
         featurizer.restore_weights(sess)
     
     if starting_weights_directory is not None:
-        print("loading classifier weights from", starting_weights_directory+'/class_weights.h5')
-        classifier.load_weights(starting_weights_directory+'/class_weights.h5')
+        print("loading classifier weights from", starting_weights_directory+'/class_weights_best.h5')
+        classifier.load_weights(starting_weights_directory+'/class_weights_best.h5')
         
     return in_images, image_tensors, features, preds, featurizer, classifier 
 
